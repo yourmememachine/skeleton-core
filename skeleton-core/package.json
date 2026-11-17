@@ -1,0 +1,1 @@
+{"description":"The shared core: config, JSON logging, errors, JSON store, task service, HTTP and CLI transports.","license":"MIT","main":"src/index.ts","name":"skeleton-core","private":true,"type":"module","version":"1.0.0"}

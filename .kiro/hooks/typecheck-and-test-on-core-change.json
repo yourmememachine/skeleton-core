@@ -1,0 +1,1 @@
+{"description":"The core is shared by both apps, so any core change must re-verify the whole build and test suite before it counts as done.","name":"typecheck-and-test-on-core-change","then":{"command":"npm test","type":"runCommand"},"version":"1.0.0","when":{"patterns":["skeleton-core/src/**"],"type":"fileEdited"}}

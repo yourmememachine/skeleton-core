@@ -1,0 +1,1 @@
+{"description":"Proof app 2: terminal task manager over the same skeleton-core task service.","license":"MIT","name":"app-two-cli","private":true,"scripts":{"start":"node ../dist/app-two-cli/src/main.js"},"type":"module","version":"1.0.0"}

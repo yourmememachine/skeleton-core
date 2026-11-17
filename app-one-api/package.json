@@ -1,0 +1,1 @@
+{"description":"Proof app 1: REST API over the shared skeleton-core task service.","license":"MIT","name":"app-one-api","private":true,"scripts":{"start":"node ../dist/app-one-api/src/main.js"},"type":"module","version":"1.0.0"}

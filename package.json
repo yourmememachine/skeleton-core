@@ -1,0 +1,19 @@
+{
+  "name": "skeleton-crew",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Skeleton Core — a lean TypeScript service skeleton proven by two apps: a REST API and a CLI.",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/**/test/*.test.js\"",
+    "start:api": "npm run build && node dist/app-one-api/src/main.js",
+    "start:cli": "npm run build && node dist/app-two-cli/src/main.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  }
+}

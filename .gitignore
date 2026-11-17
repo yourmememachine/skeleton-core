@@ -1,0 +1,11 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Runtime data written by the JSON store
+data/
+*.tmp
+
+# NOTE: .kiro/ is intentionally NOT ignored — Kiroween rules require the
+# /.kiro directory (specs, steering, hooks) at the repo root, and adding
+# it to .gitignore can disqualify the submission.
