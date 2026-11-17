@@ -42,7 +42,7 @@ async function resolveId(prefix: string): Promise<string> {
 }
 
 const cli = new Cli("tasks")
-  .command("add", "add <title> [--status todo|doing|done]", async (ctx) => {
+  .command("add", "add <title> [--status todo|doing|done] [--json]", async (ctx) => {
     const title = needArg(ctx, 0, "title");
     const status = typeof ctx.flags.status === "string" ? ctx.flags.status : undefined;
     const task = await tasks.create({ title, status });
@@ -60,16 +60,17 @@ const cli = new Cli("tasks")
       for (const task of all) print(task, false);
     }
   })
-  .command("get", "get <id>", async (ctx) => {
+  .command("get", "get <id> [--json]", async (ctx) => {
     print(await tasks.get(await resolveId(needArg(ctx, 0, "id"))), ctx.flags.json === true);
   })
-  .command("done", "done <id> — mark a task done", async (ctx) => {
+  .command("done", "done <id> [--json] — mark a task done", async (ctx) => {
     const task = await tasks.update(await resolveId(needArg(ctx, 0, "id")), { status: "done" });
     print(task, ctx.flags.json === true);
   })
-  .command("remove", "remove <id>", async (ctx) => {
+  .command("remove", "remove <id> [--json]", async (ctx) => {
     const task = await tasks.remove(await resolveId(needArg(ctx, 0, "id")));
-    console.log(`Removed: ${task.title}`);
+    if (ctx.flags.json === true) print(task, true);
+    else console.log(`Removed: ${task.title}`);
   });
 
 process.exitCode = await cli.run(process.argv.slice(2));

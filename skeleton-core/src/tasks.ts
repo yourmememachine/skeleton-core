@@ -49,8 +49,7 @@ export class TaskService {
       createdAt: now,
       updatedAt: now,
     };
-    const all = await this.store.all();
-    await this.store.save([...all, task]);
+    await this.store.mutate((current) => [...current, task]);
     return task;
   }
 
@@ -68,23 +67,31 @@ export class TaskService {
     return task;
   }
 
-  async update(id: string, patch: Record<string, unknown>): Promise<Task> {
-    const all = await this.store.all();
-    const existing = all.find((t) => t.id === id);
-    if (!existing) throw new NotFoundError(`task ${id}`);
-    const next: Task = { ...existing };
-    if (patch.title !== undefined) next.title = cleanTitle(patch.title);
-    if (patch.status !== undefined) next.status = cleanStatus(patch.status);
-    next.updatedAt = new Date().toISOString();
-    await this.store.save(all.map((t) => (t.id === id ? next : t)));
-    return next;
+  async update(id: string, patch: TaskPatch): Promise<Task> {
+    let updated: Task | undefined;
+    await this.store.mutate((all) => {
+      const existing = all.find((t) => t.id === id);
+      if (!existing) throw new NotFoundError(`task ${id}`);
+      const next: Task = { ...existing };
+      if (patch.title !== undefined) next.title = cleanTitle(patch.title);
+      if (patch.status !== undefined) next.status = cleanStatus(patch.status);
+      next.updatedAt = new Date().toISOString();
+      updated = next;
+      return all.map((t) => (t.id === id ? next : t));
+    });
+    if (!updated) throw new NotFoundError(`task ${id}`); // unreachable — mutate threw above
+    return updated;
   }
 
   async remove(id: string): Promise<Task> {
-    const all = await this.store.all();
-    const task = all.find((t) => t.id === id);
-    if (!task) throw new NotFoundError(`task ${id}`);
-    await this.store.save(all.filter((t) => t.id !== id));
-    return task;
+    let removed: Task | undefined;
+    await this.store.mutate((all) => {
+      const task = all.find((t) => t.id === id);
+      if (!task) throw new NotFoundError(`task ${id}`);
+      removed = task;
+      return all.filter((t) => t.id !== id);
+    });
+    if (!removed) throw new NotFoundError(`task ${id}`); // unreachable — mutate threw above
+    return removed;
   }
 }

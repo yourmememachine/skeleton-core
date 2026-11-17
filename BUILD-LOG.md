@@ -69,3 +69,48 @@ appear in the CLI, both directions, processes running simultaneously.
 
 Devpost registration, Kiro/AWS Builder ID sign-in, GitHub repo creation
 + push, YouTube demo upload. No spending anywhere in this build.
+
+---
+
+## Review fixes — 2026-11-17 (Dilip's code review)
+
+Dilip reviewed the raw source and his fixes were applied the same day,
+in his priority order. No new dependencies; runtime is still pure Node
+standard library; the layout and the "no framework, no magic" stance
+are unchanged.
+
+- **Store file lock** (`store.ts`): every write now runs under an
+  exclusive `<store>.lock` (`wx` create, 25 attempts, 20–50 ms jittered
+  backoff, locks older than ~10 s treated as stale and broken, released
+  in a `finally`). The atomic temp-file-then-rename write and the
+  mtime-keyed cache are unchanged. On top of the lock, the store gained
+  `mutate()`: a read-modify-write that re-checks the mtime *inside* the
+  lock and reloads before merging, so a change computed from stale
+  in-memory records cannot clobber the other process's newer writes.
+  `TaskService.create/update/remove` now go through `mutate()`.
+- **Tighter types**: `TaskService.update` takes a typed `TaskPatch`
+  (`title?: string; status?: TaskStatus`) instead of
+  `Record<string, unknown>`; the app layer shapes wire bodies into a
+  `TaskPatch` via a local `asTaskPatch()` adapter (the only casts left,
+  at the transport boundary) and routes use `params.id!` instead of
+  `as string`. Validation still lives in the service.
+- **Store `clear()`**: empties the records and persists the empty
+  array under the same lock — for tests.
+- **Shutdown robustness**: `onShutdown` accepts an opt-in
+  `{ catchErrors: true }` to also run cleanups (and exit 1) on
+  `uncaughtException` / `unhandledRejection`. Default behaviour is
+  unchanged.
+- **CLI `--json` consistency**: `remove` now prints the removed task
+  as JSON under `--json`, and every task-printing command's usage line
+  advertises `[--json]`.
+- **Docs**: README gained a "Concurrency" section (lock behaviour, and
+  full-UUID-in-the-API vs 8-char-prefix-in-the-CLI by design).
+
+Verification: clean-tree run (`rm -rf node_modules dist` →
+`npm install` → `npm test`) — **31 tests, 31 pass, 0 fail** (was 24;
++4 store: lock serialisation, stale-lock break, `clear()`, concurrent
+two-instance appends lose no records; +1 tasks: two services sharing
+one file lose no creates under concurrency; +2 shutdown: opt-in
+verified on and off). The API integration test also gained a
+bogus-status PATCH → 400 case, and the CLI integration test now covers
+`get --json` and `remove --json`.

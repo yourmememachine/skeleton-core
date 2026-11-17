@@ -21,7 +21,7 @@ that is the whole argument of the skeleton, demonstrated instead of claimed.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # 24 tests: core units + both apps' integration tests
+npm test             # 31 tests: core units + both apps' integration tests
 
 # App 1 — the API (terminal 1)
 PORT=3000 npm run start:api
@@ -45,7 +45,7 @@ the runtime is pure Node standard library.
 | `config.ts` | Env config, validated once at startup, fail-fast messages. |
 | `logger.ts` | Structured JSON logging behind a swappable interface. |
 | `errors.ts` | `AppError` / `NotFoundError` / `ValidationError` — errors as values at boundaries. |
-| `store.ts` | JSON-file store: atomic writes, mtime-keyed cache so another process's writes are picked up live. |
+| `store.ts` | JSON-file store: lockfile-serialised atomic writes, mtime-keyed cache so another process's writes are picked up live. |
 | `tasks.ts` | The domain service: the task model + all validation, shared by both apps. |
 | `http.ts` | Router on `node:http` — patterns with `:params`, JSON in/out, error→status mapping. |
 | `cli.ts` | argv parsing, subcommand dispatch, error→exit-code mapping. |
@@ -55,6 +55,24 @@ The design rule that makes it work: **transports translate, the core
 decides.** Validation lives in the domain service, never in a route or a
 command; transports only convert `AppError`s into HTTP statuses or exit
 codes. Add a third transport tomorrow and the core does not change.
+
+## Concurrency: two apps, one file
+
+Sharing one store file between the API and the CLI is safe by design:
+
+- **Writes are serialised by a lockfile.** Every write runs under an
+  exclusive `<store>.lock` (created with `wx`, retried with a small
+  jittered backoff, and broken if it is more than ~10 s old — a crashed
+  writer never wedges the store). Inside the lock the write is still
+  the atomic temp-file-then-rename, and read-modify-write operations
+  reload first if the file changed, so two processes cannot lose each
+  other's updates.
+- **Reads never lock.** They use the mtime-keyed cache: another
+  process's committed write is picked up on the next read.
+- **IDs differ by transport, on purpose.** The API addresses tasks by
+  their full UUID (`GET /tasks/<uuid>`); the CLI also accepts the
+  8-character prefixes it prints, because humans copy those. Prefix
+  resolution is a CLI convenience, not part of the API contract.
 
 ## How Kiro was used
 

@@ -5,7 +5,7 @@ export { loadConfig, type AppConfig } from "./config.js";
 export { createLogger, type Logger } from "./logger.js";
 export { AppError, NotFoundError, ValidationError } from "./errors.js";
 export { JsonStore } from "./store.js";
-export { onShutdown } from "./shutdown.js";
+export { onShutdown, type Cleanup, type ShutdownOptions } from "./shutdown.js";
 export {
   TASK_STATUSES,
   TaskService,

@@ -61,6 +61,10 @@ test("CLI lifecycle, exit codes, and the cross-app shared store", async () => {
   const done = await cli(["done", task.id.slice(0, 8)]);
   assert.match(done.stdout, /\(done\)/);
 
+  // get --json prints the full task, like every task-printing command
+  const got = await cli(["get", task.id.slice(0, 8), "--json"]);
+  assert.equal((JSON.parse(got.stdout) as Task).id, task.id);
+
   // validation failure exits 2; unknown id exits 3
   assert.equal((await cli(["add", ""], true)).code, 2);
   assert.equal((await cli(["get", "zzzzzzzz"], true)).code, 3);
@@ -79,8 +83,9 @@ test("CLI lifecycle, exit codes, and the cross-app shared store", async () => {
   assert.equal(doneTasks[0]?.id, task.id);
   assert.equal(doneTasks[0]?.title, "CLI task one");
 
-  // remove via CLI, list is down to one
-  await cli(["remove", task.id.slice(0, 8)]);
+  // remove via CLI with --json (prints the removed task), list is down to one
+  const removedOut = await cli(["remove", task.id.slice(0, 8), "--json"]);
+  assert.equal((JSON.parse(removedOut.stdout) as Task).id, task.id);
   const after = await cli(["list", "--json"]);
   const remaining = JSON.parse(after.stdout) as Task[];
   assert.equal(remaining.length, 1);

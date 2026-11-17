@@ -71,6 +71,12 @@ test("full CRUD cycle with core error mapping", async () => {
   assert.equal(patched.status, 200);
   assert.equal(patched.json.status, "done");
 
+  // Patch with a bogus status → 400 VALIDATION (the app layer only
+  // shapes the patch; the service still validates the values)
+  const badPatch = await call("PATCH", `/tasks/${task.id}`, { status: "bogus" });
+  assert.equal(badPatch.status, 400);
+  assert.equal(badPatch.json.error, "VALIDATION");
+
   // Missing id → 404 NOT_FOUND
   const missing = await call("GET", "/tasks/does-not-exist");
   assert.equal(missing.status, 404);

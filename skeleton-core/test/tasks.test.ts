@@ -49,7 +49,9 @@ test("get/update/remove round-trip, missing ids are NotFoundError", async () => 
   assert.equal(updated.title, "done trip");
   assert.ok(updated.updatedAt >= task.updatedAt);
 
-  await assert.rejects(() => svc.update(task.id, { status: "bogus" }), ValidationError);
+  // Note: update() now takes a typed TaskPatch, so a bogus status is a
+  // compile error here; the runtime rejection of a bogus status sent
+  // over the wire is covered by the API integration test (PATCH → 400).
 
   const removed = await svc.remove(task.id);
   assert.equal(removed.id, task.id);
@@ -58,4 +60,21 @@ test("get/update/remove round-trip, missing ids are NotFoundError", async () => 
   await assert.rejects(() => svc.get(task.id), NotFoundError);
   await assert.rejects(() => svc.update(task.id, {}), NotFoundError);
   await assert.rejects(() => svc.remove(task.id), NotFoundError);
+});
+
+test("two services sharing one store file lose no creates under concurrency", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skeleton-tasks-race-"));
+  const file = join(dir, "tasks.json");
+  // Two services, two store instances, one file — the API + CLI setup.
+  const a = new TaskService(new JsonStore<Task>(file));
+  const b = new TaskService(new JsonStore<Task>(file));
+  const creates: Array<Promise<unknown>> = [];
+  for (let i = 0; i < 8; i++) {
+    creates.push(a.create({ title: `from a ${i}` }));
+    creates.push(b.create({ title: `from b ${i}` }));
+  }
+  await Promise.all(creates);
+  const all = await new TaskService(new JsonStore<Task>(file)).list();
+  assert.equal(all.length, 16);
+  assert.equal(new Set(all.map((t) => t.id)).size, 16);
 });

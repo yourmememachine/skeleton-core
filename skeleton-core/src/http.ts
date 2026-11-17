@@ -97,9 +97,11 @@ function matchSegments(pattern: string[], actual: string[]): Record<string, stri
   if (pattern.length !== actual.length) return null;
   const params: Record<string, string> = {};
   for (let i = 0; i < pattern.length; i++) {
-    const p = pattern[i] as string;
-    if (p.startsWith(":")) params[p.slice(1)] = decodeURIComponent(actual[i] as string);
-    else if (p !== actual[i]) return null;
+    const p = pattern[i];
+    const a = actual[i];
+    if (p === undefined || a === undefined) return null; // lengths already checked equal
+    if (p.startsWith(":")) params[p.slice(1)] = decodeURIComponent(a);
+    else if (p !== a) return null;
   }
   return params;
 }
