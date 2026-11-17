@@ -74,6 +74,20 @@ test("a stale lock file is broken, not waited on", async () => {
   await assert.rejects(() => stat(lock), /ENOENT/); // lock released afterwards
 });
 
+test("release never removes a lock another owner has taken over", async () => {
+  const { store, file } = await tempStore();
+  const lock = `${file}.lock`;
+  const foreign = "424242:0:foreign-owner-token";
+  await store.mutate(async (all) => {
+    // Mid-hold, a peer judges our lock stale, breaks it, and takes a
+    // lock of its own — same path, different ownership token.
+    await writeFile(lock, `${foreign}\n`, "utf8");
+    return all;
+  });
+  // Our release must have left the peer's live lock untouched.
+  assert.equal((await readFile(lock, "utf8")).trim(), foreign);
+});
+
 test("clear empties the store and persists the empty array", async () => {
   const { store, file } = await tempStore();
   await store.save([{ id: 1 }, { id: 2 }]);

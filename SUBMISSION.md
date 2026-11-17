@@ -24,7 +24,7 @@ Every small service project starts by re-writing the same bones: config loading,
 
 **The demonstration that matters:** point both apps at the same `STORE_FILE` and they share data live, in both directions — add a task in the terminal and it appears in the API; mark it done in the CLI and the API's filtered view changes; post through the API and the CLI lists it. The store's mtime-keyed cache is what makes a second process's writes visible with no integration code and no database.
 
-31 automated tests cover the core units and both apps end-to-end, including a cross-app integration test that creates data through the CLI subprocess and reads it back through the API over HTTP.
+33 automated tests cover the core units and both apps end-to-end, including a cross-app integration test that creates data through the CLI subprocess and reads it back through the API over HTTP.
 
 **Try it:** `npm install && npm run build && npm test`, then `npm run start:api` / `npm run start:cli -- list`. Node 20+.
 

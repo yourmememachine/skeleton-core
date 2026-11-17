@@ -100,10 +100,23 @@ function matchSegments(pattern: string[], actual: string[]): Record<string, stri
     const p = pattern[i];
     const a = actual[i];
     if (p === undefined || a === undefined) return null; // lengths already checked equal
-    if (p.startsWith(":")) params[p.slice(1)] = decodeURIComponent(a);
+    if (p.startsWith(":")) params[p.slice(1)] = decodeParam(a);
     else if (p !== a) return null;
   }
   return params;
+}
+
+/**
+ * Decode one path parameter. A malformed % sequence makes
+ * decodeURIComponent throw URIError — that is the client's error
+ * (400 VALIDATION), not a server crash (500 INTERNAL).
+ */
+function decodeParam(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new AppError("Malformed URL encoding", "VALIDATION", 400);
+  }
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {

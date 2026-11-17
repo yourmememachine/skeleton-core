@@ -90,6 +90,12 @@ test("full CRUD cycle with core error mapping", async () => {
   assert.equal((await call("GET", "/tasks")).json.length, 0);
 });
 
+test("malformed URL encoding in the path is a 400, not a 500", async () => {
+  const { status, json } = await call("GET", "/tasks/%E0%A4%A");
+  assert.equal(status, 400);
+  assert.equal(json.error, "VALIDATION");
+});
+
 test("malformed JSON body is a 400, not a crash", async () => {
   const res = await fetch(`${base}/tasks`, {
     method: "POST",

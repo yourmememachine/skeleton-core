@@ -114,3 +114,27 @@ one file lose no creates under concurrency; +2 shutdown: opt-in
 verified on and off). The API integration test also gained a
 bogus-status PATCH → 400 case, and the CLI integration test now covers
 `get --json` and `remove --json`.
+
+## Hardening — 2026-11-17 (post-review nits)
+
+Two nits found reviewing the fixed code, both closed:
+
+- **Lock ownership token** (`skeleton-core/src/store.ts`): `withLock`
+  used to remove the lockfile unconditionally on release. If a hold
+  ever outlived the 10 s stale limit, another process could break the
+  "stale" lock and take its own — and the first holder's release would
+  then have deleted the second owner's live lock. Acquire now writes a
+  unique ownership token (`pid:timestamp:uuid`) into the lockfile;
+  release reads the file back and removes it only if the token is
+  still ours. Regression test: a lock whose content is replaced by
+  another owner mid-hold survives the first holder's release.
+- **Malformed URL encoding** (`skeleton-core/src/http.ts`):
+  `decodeURIComponent` in `matchSegments` threw `URIError` on a
+  malformed `%` sequence, surfacing as 500 INTERNAL. Decoding now goes
+  through `decodeParam`, which converts it to
+  `AppError("Malformed URL encoding", "VALIDATION", 400)` — a client
+  error. API integration test: `GET /tasks/%E0%A4%A` → 400 VALIDATION.
+
+Verification: clean-tree run (`rm -rf node_modules dist` →
+`npm install` → `npm test`) — **33 tests, 33 pass, 0 fail** (was 31;
++1 store: lock-ownership regression; +1 API: malformed-encoding 400).

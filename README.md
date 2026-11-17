@@ -21,7 +21,7 @@ that is the whole argument of the skeleton, demonstrated instead of claimed.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # 31 tests: core units + both apps' integration tests
+npm test             # 33 tests: core units + both apps' integration tests
 
 # App 1 — the API (terminal 1)
 PORT=3000 npm run start:api

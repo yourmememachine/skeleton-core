@@ -3,6 +3,10 @@
 // mid-write can never corrupt the data file, and every write runs
 // under an exclusive lockfile so two processes sharing the file (the
 // API and the CLI) serialise instead of losing each other's updates.
+// The lockfile carries an ownership token, and a holder only ever
+// removes a lock whose token is still its own — so if a lock is ever
+// broken as stale and re-acquired by another process, the first
+// holder's release cannot delete the new owner's live lock.
 // Read-modify-write goes through mutate(): inside the lock the file's
 // mtime is re-checked and the contents reloaded if another process
 // rewrote them, so a change computed from stale in-memory records can
@@ -12,6 +16,7 @@
 // Deliberately boring beyond that: swap this one module when a real
 // database shows up.
 
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -91,25 +96,27 @@ export class JsonStore<T> {
 
   private async withLock<R>(fn: () => Promise<R>): Promise<R> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await this.acquireLock();
+    const token = await this.acquireLock();
     try {
       return await fn();
     } finally {
-      await rm(`${this.filePath}.lock`, { force: true });
+      await this.releaseLock(token);
     }
   }
 
   /**
    * Take the lockfile by creating it exclusively ("wx" fails if it
-   * already exists). Retries with a small jittered backoff; a lock
-   * older than LOCK_STALE_MS is treated as abandoned and broken.
+   * already exists), writing our ownership token into it. Retries with
+   * a small jittered backoff; a lock older than LOCK_STALE_MS is
+   * treated as abandoned and broken. Returns the token.
    */
-  private async acquireLock(): Promise<void> {
+  private async acquireLock(): Promise<string> {
     const lockPath = `${this.filePath}.lock`;
+    const token = `${process.pid}:${Date.now()}:${randomUUID()}`;
     for (let attempt = 1; attempt <= LOCK_ATTEMPTS; attempt++) {
       try {
-        await writeFile(lockPath, `${process.pid}\n`, { flag: "wx" });
-        return;
+        await writeFile(lockPath, `${token}\n`, { flag: "wx" });
+        return token;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       }
@@ -128,6 +135,22 @@ export class JsonStore<T> {
       await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_SPREAD_MS);
     }
     throw new Error(`Could not acquire store lock ${lockPath} after ${LOCK_ATTEMPTS} attempts`);
+  }
+
+  /**
+   * Remove the lockfile — but only if it still holds OUR token. If our
+   * hold ever outlived LOCK_STALE_MS, another process may have broken
+   * the lock as stale and taken its own; that lock is theirs to
+   * release, and deleting it would let a third writer in mid-hold.
+   */
+  private async releaseLock(token: string): Promise<void> {
+    const lockPath = `${this.filePath}.lock`;
+    try {
+      const held = await readFile(lockPath, "utf8");
+      if (held.trim() === token) await rm(lockPath, { force: true });
+    } catch {
+      // Lock already gone or unreadable — nothing of ours to remove.
+    }
   }
 
   private async mtime(): Promise<number | null> {
