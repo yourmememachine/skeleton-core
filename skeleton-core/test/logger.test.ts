@@ -23,3 +23,30 @@ test("filters below the minimum level", () => {
   log.error("yes");
   assert.equal(lines.length, 2);
 });
+
+test("caller meta cannot overwrite the reserved fields", () => {
+  const lines: string[] = [];
+  const log = createLogger("info", (l) => lines.push(l));
+  log.info("real", { level: "error", msg: "forged", ts: "1970-01-01" });
+  const parsed = JSON.parse(lines[0] as string) as Record<string, unknown>;
+  assert.equal(parsed.level, "info");
+  assert.equal(parsed.msg, "real");
+  assert.notEqual(parsed.ts, "1970-01-01");
+});
+
+test("unserialisable meta degrades instead of throwing; Errors keep their message", () => {
+  const lines: string[] = [];
+  const log = createLogger("info", (l) => lines.push(l));
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  log.info("circ", circular); // must not throw
+  assert.equal(lines.length, 1);
+  assert.equal((JSON.parse(lines[0] as string) as Record<string, unknown>).msg, "circ");
+  log.error("failed", { err: new Error("the real cause") });
+  const parsed = JSON.parse(lines[1] as string) as { err: { message: string } };
+  assert.equal(parsed.err.message, "the real cause");
+});
+
+test("an unknown minimum level is rejected, not silently ignored", () => {
+  assert.throws(() => createLogger("bogus" as "info"), /Unknown log level/);
+});

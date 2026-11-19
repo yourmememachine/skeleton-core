@@ -19,9 +19,10 @@ STORE_FILE=data/tasks.json npm run start:cli -- list
 |---|---|
 | `add <title> [--status todo\|doing\|done] [--json]` | Create a task |
 | `list [--status ...] [--json]` | List tasks |
-| `get <id>` | Show one task (id or its 8-char prefix) |
-| `done <id>` | Mark a task done |
-| `remove <id>` | Delete a task |
+| `get <id> [--json]` | Show one task (full id or its 8-char prefix) |
+| `done <id> [--json]` | Mark a task done |
+| `edit <id> [--title <title>] [--status ...] [--json]` | Rename a task or change its status |
+| `remove <id> [--json]` | Delete a task |
 | `help` | Usage |
 
 Exit codes mirror the core's error contract: 0 ok, 2 validation,

@@ -3,13 +3,17 @@
 // exactly as production runs them.
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { createLogger, serve, type Task } from "../../skeleton-core/src/index.js";
 import { createTaskRouter } from "../src/app.js";
+
+const mainPath = fileURLToPath(new URL("../src/main.js", import.meta.url));
 
 let server: Server;
 let base: string;
@@ -105,4 +109,70 @@ test("malformed JSON body is a 400, not a crash", async () => {
   assert.equal(res.status, 400);
   const json = (await res.json()) as { error: string };
   assert.equal(json.error, "VALIDATION");
+});
+
+test("the documented contract details: prefixes, filters, patch rules", async () => {
+  const created = await call("POST", "/tasks", { title: "Contract task" });
+  assert.equal(created.status, 201);
+  const task = created.json as Task;
+  const prefix = task.id.slice(0, 8);
+
+  // The API addresses tasks by full UUID only — an 8-char prefix is a
+  // CLI convenience and must 404 here on every verb.
+  assert.equal((await call("GET", `/tasks/${prefix}`)).status, 404);
+  assert.equal((await call("PATCH", `/tasks/${prefix}`, { status: "done" })).status, 404);
+  assert.equal((await call("DELETE", `/tasks/${prefix}`)).status, 404);
+
+  // DELETE of a missing id is the same NOT_FOUND as GET.
+  const delMissing = await call("DELETE", "/tasks/does-not-exist");
+  assert.equal(delMissing.status, 404);
+  assert.equal(delMissing.json.error, "NOT_FOUND");
+
+  // The status filter validates its value; create validates its input.
+  assert.equal((await call("GET", "/tasks?status=bogus")).status, 400);
+  assert.equal((await call("POST", "/tasks", { title: "x", status: "bogus" })).status, 400);
+  assert.equal((await call("POST", "/tasks", { title: "x".repeat(201) })).status, 400);
+
+  // An empty patch — or a non-object body — is a 400, never a silent
+  // 200 that bumps updatedAt (POST of the same body already 400s).
+  const emptyPatch = await call("PATCH", `/tasks/${task.id}`, {});
+  assert.equal(emptyPatch.status, 400);
+  assert.equal(emptyPatch.json.error, "VALIDATION");
+  assert.equal((await call("PATCH", `/tasks/${task.id}`, 123)).status, 400);
+  const after = await call("GET", `/tasks/${task.id}`);
+  assert.equal(after.json.updatedAt, task.updatedAt);
+
+  // Clean up after ourselves.
+  assert.equal((await call("DELETE", `/tasks/${task.id}`)).status, 204);
+});
+
+test("the real main.ts boots, identifies itself, and exits 0 on SIGTERM", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skeleton-api-main-"));
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PORT: String(port),
+    STORE_FILE: join(dir, "tasks.json"),
+    LOG_LEVEL: "error",
+  };
+  delete env.SERVICE_NAME; // the app must default its own name
+  const child = spawn(process.execPath, [mainPath], { env });
+  try {
+    let health: { status?: string; service?: string } | undefined;
+    for (let i = 0; i < 50 && health === undefined; i++) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`);
+        if (res.ok) health = (await res.json()) as { status?: string; service?: string };
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    assert.ok(health !== undefined, "API main.ts did not start listening");
+    assert.equal(health.status, "ok");
+    assert.equal(health.service, "app-one-api");
+  } finally {
+    child.kill("SIGTERM");
+  }
+  const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+  assert.equal(code, 0); // graceful shutdown, not a crash
 });

@@ -1,6 +1,18 @@
 // HTTP transport: a small router on node:http. Routes are "METHOD /path"
 // patterns with :params. Handlers return a value (sent as JSON) or throw
 // an AppError (translated to its httpStatus). No framework, no magic.
+//
+// Routing semantics, deliberately simple — know them before adding
+// routes: routes are tried in registration order and the first match
+// wins, so register static routes before :param routes that could
+// shadow them (and never register the same method+pattern twice — the
+// second is unreachable). A path that exists only under another method
+// is a 404, not a 405. Path segments are split on "/" with empty
+// segments dropped ("/tasks//1" routes like "/tasks/1"); :param values
+// are percent-decoded, static segments are matched literally.
+// Bodies are always parsed as JSON regardless of Content-Type (an
+// empty body becomes {}); GET/DELETE bodies are discarded unread
+// beyond draining the stream so the connection stays reusable.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { AppError } from "./errors.js";
@@ -49,7 +61,18 @@ export class Router {
   }
 
   async handle(req: IncomingMessage, res: ServerResponse, log: Logger): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    // Parse the request-target first, under its own guard: it is
+    // client-controlled, and a target the URL parser rejects is a
+    // 400 — it must never escape handle() as an unhandled rejection
+    // that leaves the client hanging with no response at all.
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      sendJson(res, 400, { error: "VALIDATION", message: "Malformed request URL" });
+      log.warn("request failed", { method: req.method ?? "?", path: req.url ?? "?", code: "VALIDATION" });
+      return;
+    }
     const segments = splitPath(url.pathname);
     const method = (req.method ?? "GET").toUpperCase();
     try {
@@ -57,7 +80,13 @@ export class Router {
         if (route.method !== method) continue;
         const params = matchSegments(route.segments, segments);
         if (params === null) continue;
-        const body = method === "GET" || method === "DELETE" ? undefined : await readJsonBody(req);
+        let body: unknown;
+        if (method === "GET" || method === "DELETE") {
+          req.resume(); // drain any body so keep-alive stays usable
+          body = undefined;
+        } else {
+          body = await readJsonBody(req);
+        }
         const result = await route.handler({ params, query: url.searchParams, body });
         if (result instanceof Reply) sendJson(res, result.status, result.value);
         else sendJson(res, result === undefined ? 204 : 200, result);
@@ -85,6 +114,11 @@ export function serve(router: Router, port: number, log: Logger): Server {
   const server = createServer((req, res) => {
     void router.handle(req, res, log);
   });
+  // Bind failures (port in use, bad port) arrive here, not as an
+  // uncaught exception with a stack dump: log them through the app's
+  // own logger. Apps that must exit on a failed bind add their own
+  // 'error' listener that calls process.exit.
+  server.on("error", (err) => log.error("server error", { error: err.message }));
   server.listen(port, () => log.info("listening", { port }));
   return server;
 }

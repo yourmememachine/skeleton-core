@@ -27,3 +27,22 @@ test("invalid PORT fails fast", () => {
 test("invalid LOG_LEVEL fails fast", () => {
   assert.throws(() => loadConfig({ LOG_LEVEL: "chatty" }), /Invalid LOG_LEVEL/);
 });
+
+test("PORT spellings Number() would reinterpret are rejected", () => {
+  for (const raw of ["0x10", "1e3", "3000.0", " 8080 ", ""]) {
+    assert.throws(() => loadConfig({ PORT: raw }), /Invalid PORT/, `PORT=${JSON.stringify(raw)}`);
+  }
+});
+
+test("empty SERVICE_NAME / STORE_FILE fail fast; LOG_LEVEL is trimmed", () => {
+  assert.throws(() => loadConfig({ SERVICE_NAME: "   " }), /Invalid SERVICE_NAME/);
+  assert.throws(() => loadConfig({ STORE_FILE: "" }), /Invalid STORE_FILE/);
+  assert.equal(loadConfig({ LOG_LEVEL: " INFO " }).logLevel, "info");
+  assert.equal(loadConfig({ SERVICE_NAME: " svc " }).serviceName, "svc");
+});
+
+test("requirePort: false skips PORT validation (the CLI binds no port)", () => {
+  const cfg = loadConfig({ PORT: "abc" }, { requirePort: false });
+  assert.equal(cfg.port, 3000); // default, unused by the caller
+  assert.equal(cfg.storePath, "data/tasks.json");
+});

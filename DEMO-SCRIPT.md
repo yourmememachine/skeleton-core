@@ -3,12 +3,12 @@
 Record the terminal at a readable font size. Two terminal windows side
 by side (left: CLI, right: API/curl), or one window switching — side by
 side sells the shared-core point. Captions carry the story; no voiceover
-needed. Target length ~2:20.
+needed. Target length ~2:30.
 
 | Time | Screen | Caption |
 |---|---|---|
 | 0:00–0:15 | Repo tree; open `.kiro/steering/product.md`, then `.kiro/specs/skeleton-core/` | "Skeleton Core — built spec-first in Kiro: steering, specs, hooks in /.kiro" |
-| 0:15–0:35 | `npm install && npm run build && npm test` — show 24/24 pass | "One lean TypeScript core. 24 tests green." |
+| 0:15–0:35 | `npm install && npm run build && npm test` — show 63/63 pass | "One lean TypeScript core. 63 tests green." |
 | 0:35–0:50 | Right window: `PORT=3000 npm run start:api`; `curl localhost:3000/health` | "App one: a REST API on the skeleton" |
 | 0:50–1:15 | Left window: `npm run start:cli -- add "Raise the skeleton"`, `add "Wire the second app"`, `list` | "App two: a CLI on the SAME core — same data file" |
 | 1:15–1:40 | Right window: `curl localhost:3000/tasks` — the CLI's tasks appear | "No integration code. The API sees the CLI's tasks live." |

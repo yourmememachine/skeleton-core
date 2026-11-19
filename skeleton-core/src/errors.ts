@@ -7,6 +7,12 @@ export class AppError extends Error {
     readonly httpStatus: number,
   ) {
     super(message);
+    // A status outside 100-599 would crash the HTTP transport's error
+    // path itself (writeHead throws), hanging the client it was trying
+    // to answer — reject it here, at construction.
+    if (!Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599) {
+      throw new Error(`AppError httpStatus must be an integer 100-599, got ${httpStatus}`);
+    }
     this.name = new.target.name;
   }
 }

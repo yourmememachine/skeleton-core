@@ -11,8 +11,18 @@ import { createTaskRouter } from "./app.js";
 const config = loadConfig();
 const log = createLogger(config.logLevel);
 
-const router = createTaskRouter(config.storePath, config.serviceName);
+// This app's own name unless the operator overrides it: /health should
+// identify app-one-api, not the core's generic "skeleton-app" default.
+const serviceName = process.env.SERVICE_NAME ?? "app-one-api";
+
+const router = createTaskRouter(config.storePath, serviceName);
 const server = serve(router, config.port, log);
 onShutdown(log, () => new Promise<void>((resolve) => server.close(() => resolve())));
 
-log.info("app-one-api ready", { service: config.serviceName, store: config.storePath });
+// A failed bind is fatal for a server. serve() has already logged the
+// error through the logger; exit rather than idle with no listener.
+server.on("error", () => process.exit(1));
+// "Ready" only once the port is actually bound — never before it.
+server.once("listening", () => {
+  log.info("app-one-api ready", { service: serviceName, store: config.storePath });
+});

@@ -17,16 +17,28 @@ export function parseArgv(argv: string[]): { command: string; ctx: CliContext } 
   const [command = "help", ...rest] = argv;
   const args: string[] = [];
   const flags: Record<string, string | boolean> = {};
+  let flagsDone = false;
   for (let i = 0; i < rest.length; i++) {
     const token = rest[i] as string;
-    if (token.startsWith("--")) {
+    if (!flagsDone && token === "--") {
+      flagsDone = true; // everything after "--" is a positional, verbatim
+      continue;
+    }
+    if (!flagsDone && token.startsWith("--")) {
       const name = token.slice(2);
-      const next = rest[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        flags[name] = next;
-        i++;
+      const eq = name.indexOf("=");
+      if (eq >= 0) {
+        // --name=value: the value is attached; never consume the
+        // following token (it is a positional or another flag).
+        flags[name.slice(0, eq)] = name.slice(eq + 1);
       } else {
-        flags[name] = true;
+        const next = rest[i + 1];
+        if (next !== undefined && !next.startsWith("--")) {
+          flags[name] = next;
+          i++;
+        } else {
+          flags[name] = true;
+        }
       }
     } else {
       args.push(token);
@@ -35,11 +47,18 @@ export function parseArgv(argv: string[]): { command: string; ctx: CliContext } 
   return { command, ctx: { args, flags } };
 }
 
-/** Stable exit codes: 0 ok, 1 internal, 2 usage/validation, 3 not found. */
+/**
+ * Stable exit codes: 0 ok, 1 internal, 2 usage/validation, 3 not found.
+ * Mapped from the error's HTTP status so the CLI and HTTP transports
+ * agree on the same AppError, whichever class carries it.
+ */
 export function exitCodeFor(err: unknown): number {
   if (err instanceof ValidationError) return 2;
   if (err instanceof NotFoundError) return 3;
-  if (err instanceof AppError) return 1;
+  if (err instanceof AppError) {
+    if (err.httpStatus === 400) return 2;
+    if (err.httpStatus === 404) return 3;
+  }
   return 1;
 }
 
@@ -49,6 +68,16 @@ export class Cli {
   constructor(private readonly programName: string) {}
 
   command(name: string, usage: string, run: Command): this {
+    // "help" is intercepted by run() before the map is consulted, so a
+    // command registered under it (or its aliases) would be listed in
+    // the usage text yet unreachable; duplicates would silently shadow
+    // the first registration. Refuse both, loudly, at startup.
+    if (name === "help" || name === "--help" || name === "-h") {
+      throw new Error(`"${name}" is reserved for the built-in help command`);
+    }
+    if (this.commands.has(name)) {
+      throw new Error(`duplicate command "${name}"`);
+    }
     this.commands.set(name, { usage, run });
     return this;
   }

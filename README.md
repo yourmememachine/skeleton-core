@@ -21,7 +21,7 @@ that is the whole argument of the skeleton, demonstrated instead of claimed.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # 33 tests: core units + both apps' integration tests
+npm test             # 63 tests: core units + both apps' integration tests
 
 # App 1 — the API (terminal 1)
 PORT=3000 npm run start:api
@@ -35,8 +35,16 @@ npm run start:cli -- list
 npm run start:cli -- done <id-prefix>
 ```
 
-Requires Node 20+. The only dependency is TypeScript itself (dev-only);
-the runtime is pure Node standard library.
+Requires Node 20+. No runtime dependencies — the runtime is pure Node
+standard library; the only dev dependencies are TypeScript and
+@types/node.
+
+Two notes for a first run: the `start:*` scripts rebuild before they
+launch, so allow a few seconds and wait for the API's `listening` /
+`app-one-api ready` log lines before curling. And `STORE_FILE` is
+resolved relative to the working directory (default `data/tasks.json`)
+— run from the repo root, as the scripts above do, or set an absolute
+path so both apps point at the same file.
 
 ## The core (`skeleton-core/src/`)
 
@@ -76,7 +84,7 @@ Sharing one store file between the API and the CLI is safe by design:
 
 ## How Kiro was used
 
-This project was built spec-first in Kiro, and the evidence is in the
+This project was built spec-first in Kiro, and the artefacts are in the
 repo, in `/.kiro` at the root:
 
 - **Steering** (`.kiro/steering/`) — `product.md` (lean, one-job
@@ -91,8 +99,9 @@ repo, in `/.kiro` at the root:
   `spec-check-on-save` (flag drift between spec and core code),
   `typecheck-and-test-on-core-change` (a core edit re-runs the full
   suite — the core is shared, so both apps must still pass), and
-  `test-on-task-complete` (checking off a spec task runs its module's
-  tests before the next task starts).
+  `test-on-task-complete` (when the spec's task list is edited, an
+  agent runs the full suite and reports the counts before work moves
+  on).
 
 The spec-driven flow earned its keep once in a way worth mentioning:
 the first live run of both apps together exposed that the store's

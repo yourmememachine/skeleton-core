@@ -111,3 +111,74 @@ test("concurrent appends from two instances lose no records", async () => {
   assert.equal(final.length, 20);
   assert.equal(new Set(final.map((r) => r.id)).size, 20);
 });
+
+test("returned arrays are snapshots — mutating them cannot corrupt the store", async () => {
+  const { store, file } = await tempStore();
+  await store.save([{ id: 1 }]);
+  // Mutating what all() returned (array AND element) changes nothing.
+  const read = await store.all();
+  read.push({ id: 99 });
+  (read[0] as { id: number }).id = 42;
+  assert.deepEqual(await store.all(), [{ id: 1 }]);
+  // Mutating an array after handing it to save() changes nothing.
+  const ext = [{ id: 5 }];
+  await store.save(ext);
+  ext.push({ id: 6 });
+  (ext[0] as { id: number }).id = 55;
+  assert.deepEqual(await store.all(), [{ id: 5 }]);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")) as unknown, [{ id: 5 }]);
+});
+
+test("a mutate callback that mutates its input then throws poisons nothing", async () => {
+  const { store, file } = await tempStore();
+  await store.save([{ id: 1 }]);
+  await assert.rejects(
+    () =>
+      store.mutate((current) => {
+        current.push({ id: 777 });
+        throw new Error("callback failed");
+      }),
+    /callback failed/,
+  );
+  assert.deepEqual(await store.all(), [{ id: 1 }]);
+  // And the next successful write does not persist the phantom record.
+  await store.mutate((all) => [...all, { id: 2 }]);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")) as unknown, [{ id: 1 }, { id: 2 }]);
+});
+
+test("a corrupt or empty store file is a clear error naming the file", async () => {
+  const { mkdir } = await import("node:fs/promises");
+  const bad = await tempStore();
+  await mkdir(dirname(bad.file), { recursive: true });
+  await writeFile(bad.file, "{not json", "utf8");
+  await assert.rejects(() => bad.store.all(), /does not contain valid JSON/);
+  const empty = await tempStore();
+  await mkdir(dirname(empty.file), { recursive: true });
+  await writeFile(empty.file, "", "utf8");
+  await assert.rejects(() => empty.store.all(), /does not contain valid JSON/);
+});
+
+test("a nested write inside a mutate callback is rejected at once", async () => {
+  const { store } = await tempStore();
+  await store.save([{ id: 1 }]);
+  await assert.rejects(
+    () =>
+      store.mutate(async (all) => {
+        await store.save([{ id: 2 }]);
+        return all;
+      }),
+    /nested write/,
+  );
+  assert.deepEqual(await store.all(), [{ id: 1 }]);
+});
+
+test("a fresh foreign lock is waited out, then given up on — not broken", async () => {
+  const { store, file } = await tempStore();
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(dirname(file), { recursive: true });
+  const lock = `${file}.lock`;
+  await writeFile(lock, "123456:0:live-owner\n", "utf8"); // fresh mtime: a live holder
+  await assert.rejects(() => store.save([{ id: 1 }]), /Could not acquire store lock/);
+  // The live lock must still be there — only stale locks are broken.
+  assert.equal((await readFile(lock, "utf8")).trim(), "123456:0:live-owner");
+});

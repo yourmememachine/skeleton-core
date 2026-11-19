@@ -25,7 +25,8 @@ order. Budget ~45 minutes total; do not leave them for Dec 4 itself.
 - [ ] For the working-app URL, use the GitHub repo URL (the README quickstart runs both apps; there is no hosted server).
 
 ## 4. Demo video (YouTube, public, < 3 minutes)
-- [ ] Record the flow in `DEMO-SCRIPT.md` — silent screen capture with captions is fine, no voice needed (~2:20 of footage).
+- [ ] Record the flow in `DEMO-SCRIPT.md` — silent screen capture with captions is fine, no voice needed (~2:30 of footage).
+- [ ] Upload `demo/skeleton-core-demo.srt` as the video's caption track so the "captioned" claim holds on YouTube itself.
 - [ ] Upload to **your** YouTube as **public**, title it "Skeleton Core — Kiroween 2026 (Skeleton Crew)".
 - [ ] Paste the video link into the Devpost submission.
 
@@ -34,7 +35,7 @@ order. Budget ~45 minutes total; do not leave them for Dec 4 itself.
 - [ ] Click **Submit** — a saved draft is NOT a submission.
 
 ---
-Already done for you: the full build (core + both apps), 24 passing
+Already done for you: the full build (core + both apps), 63 passing
 tests, `.kiro` steering/specs/hooks, README, per-app READMEs,
 `SUBMISSION.md` (paste-ready), `DEMO-SCRIPT.md`, MIT licence.
 No fees at any step.

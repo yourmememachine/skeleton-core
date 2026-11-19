@@ -138,3 +138,55 @@ Two nits found reviewing the fixed code, both closed:
 Verification: clean-tree run (`rm -rf node_modules dist` →
 `npm install` → `npm test`) — **33 tests, 33 pass, 0 fail** (was 31;
 +1 store: lock-ownership regression; +1 API: malformed-encoding 400).
+
+## Correctness and contract pass — 2026-11-19
+
+A full re-read of the core and both apps against their own docs,
+fixing what a judge running the code would hit:
+
+- **Store snapshots** (`store.ts`, `tasks.ts`): reads and service
+  results are deep copies — a caller mutating a returned record no
+  longer rewrites stored state or bypasses validation. The cache
+  stamp is now mtime + size, and a write stamps its temp file before
+  the rename so a foreign write can never be adopted as our own.
+- **Locking** (`store.ts`): a stale lock is broken by renaming it
+  aside (only the process that wins the rename deletes it), a nested
+  write from inside a mutate callback fails with a clear error
+  instead of deadlocking, and a corrupt or empty store file reports
+  "does not contain valid JSON" naming the file.
+- **HTTP** (`http.ts`): a malformed request-target (`GET http://[::1/…`)
+  gets a 400 response instead of a hung socket; GET/DELETE request
+  bodies are drained so keep-alive connections stay usable.
+- **Service contract** (`tasks.ts`): non-object input and empty
+  patches are ValidationErrors — an empty PATCH no longer returns 200
+  while bumping `updatedAt`, so the API and the new CLI `edit`
+  command share one patch contract.
+- **CLI** (`cli.ts`, app-two `main.ts`): `--flag=value` parses as the
+  flag's value (it was swallowed as a positional); `--` ends flag
+  parsing; exit codes follow the error's HTTP status in both
+  transports; ids must be a full UUID or the printed 8-char prefix
+  (a 1-char "prefix" could previously act on the only stored task);
+  unquoted multi-word titles are joined, not truncated; a valueless
+  `--status` is a usage error; ambiguous prefixes name their matches;
+  `remove` prints the 8-char id; a stray invalid `PORT` no longer
+  blocks the CLI, and config errors exit 2 with one line.
+- **Config / logger / errors** (`config.ts`, `logger.ts`,
+  `errors.ts`): PORT spellings like `0x10` are rejected; empty
+  SERVICE_NAME / STORE_FILE fail fast; caller log metadata can no
+  longer overwrite the reserved `ts`/`level`/`msg` fields, and an
+  unserialisable meta object degrades instead of throwing after a
+  response was sent; an out-of-range AppError status is rejected at
+  construction instead of crashing the error path itself.
+- **API main** (`app-one-api/src/main.ts`): `/health` now reports
+  `app-one-api` by default, the ready line logs only once the port is
+  bound, and a failed bind exits instead of idling.
+- **Docs**: test counts corrected to the real total everywhere, the
+  "only dependency" line now names both dev dependencies, hook
+  descriptions match the hook definitions, the spec gained the
+  cross-process concurrency requirement, and `demo/` is gitignored.
+
+Verification: `npm test` — **63 tests, 63 pass, 0 fail** (was 33;
++30 across store snapshots/locking, config, logger, errors, CLI
+parsing and run paths, a new HTTP transport suite, API contract
+assertions, CLI contract/exit-code tests, both-directions live
+cross-app sharing, and a boot test of the real API `main.ts`).

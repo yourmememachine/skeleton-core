@@ -25,3 +25,11 @@ test("ValidationError is a 400", () => {
   assert.equal(err.code, "VALIDATION");
   assert.match(err.message, /title must not be empty/);
 });
+
+test("AppError rejects a status outside 100-599 at construction", () => {
+  // Such a status would crash the HTTP error path itself (writeHead
+  // throws), hanging the client the error was meant to answer.
+  assert.throws(() => new AppError("x", "BAD", 99), /httpStatus/);
+  assert.throws(() => new AppError("x", "BAD", 999), /httpStatus/);
+  assert.throws(() => new AppError("x", "BAD", 200.5), /httpStatus/);
+});

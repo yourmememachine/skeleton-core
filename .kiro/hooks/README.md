@@ -11,6 +11,7 @@ the project is open in Kiro.
   changes, runs `npm test` (full typecheck + suite). The core is shared
   by both apps, so a core change is not "done" until both apps still
   pass against it.
-- **`test-on-task-complete.json`** — when a task in
-  `.kiro/specs/skeleton-core/tasks.md` is checked off, runs the affected
-  module's tests and reports the result before the next task starts.
+- **`test-on-task-complete.json`** — when
+  `.kiro/specs/skeleton-core/tasks.md` is edited, an agent prompt runs
+  the full suite (`npm test` from the repo root) and reports pass/fail
+  counts; on failure it reports before the next task starts.

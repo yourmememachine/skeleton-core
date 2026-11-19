@@ -41,6 +41,9 @@ export class TaskService {
   constructor(private readonly store: JsonStore<Task>) {}
 
   async create(input: { title?: unknown; status?: unknown }): Promise<Task> {
+    if (input === null || typeof input !== "object") {
+      throw new ValidationError("task input must be an object");
+    }
     const now = new Date().toISOString();
     const task: Task = {
       id: randomUUID(),
@@ -68,10 +71,19 @@ export class TaskService {
   }
 
   async update(id: string, patch: TaskPatch): Promise<Task> {
+    if (patch === null || typeof patch !== "object") {
+      throw new ValidationError("patch must be an object");
+    }
     let updated: Task | undefined;
     await this.store.mutate((all) => {
       const existing = all.find((t) => t.id === id);
       if (!existing) throw new NotFoundError(`task ${id}`);
+      // An empty patch is a client error, not a silent no-op write:
+      // without this check it would bump updatedAt and rewrite the
+      // file while changing nothing.
+      if (patch.title === undefined && patch.status === undefined) {
+        throw new ValidationError("patch must include title or status");
+      }
       const next: Task = { ...existing };
       if (patch.title !== undefined) next.title = cleanTitle(patch.title);
       if (patch.status !== undefined) next.status = cleanStatus(patch.status);

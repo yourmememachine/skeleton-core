@@ -78,3 +78,40 @@ test("two services sharing one store file lose no creates under concurrency", as
   assert.equal(all.length, 16);
   assert.equal(new Set(all.map((t) => t.id)).size, 16);
 });
+
+test("non-object input is a ValidationError, not a TypeError", async () => {
+  const svc = await freshService();
+  await assert.rejects(
+    () => svc.create(null as unknown as { title?: unknown }),
+    ValidationError,
+  );
+  const task = await svc.create({ title: "real" });
+  await assert.rejects(
+    () => svc.update(task.id, null as unknown as { title: string }),
+    ValidationError,
+  );
+});
+
+test("an empty patch is a ValidationError and changes nothing", async () => {
+  const svc = await freshService();
+  const task = await svc.create({ title: "untouched" });
+  await assert.rejects(() => svc.update(task.id, {}), ValidationError);
+  const after = await svc.get(task.id);
+  assert.equal(after.title, "untouched");
+  assert.equal(after.updatedAt, task.updatedAt);
+});
+
+test("returned tasks are snapshots — mutating them bypasses nothing", async () => {
+  const svc = await freshService();
+  const created = await svc.create({ title: "original" });
+  created.title = "HACKED";
+  (created as { status: string }).status = "bogus";
+  const fetched = await svc.get(created.id);
+  assert.equal(fetched.title, "original");
+  assert.equal(fetched.status, "todo");
+  fetched.title = "HACKED AGAIN";
+  assert.equal((await svc.get(created.id)).title, "original");
+  const listed = await svc.list();
+  (listed[0] as Task).title = "HACKED FROM LIST";
+  assert.equal((await svc.get(created.id)).title, "original");
+});

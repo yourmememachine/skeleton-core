@@ -2,6 +2,10 @@
 node_modules/
 dist/
 
+# Local demo recording assets (video + caption track) — kept out of the
+# submission tree
+demo/
+
 # Runtime data written by the JSON store
 data/
 *.tmp

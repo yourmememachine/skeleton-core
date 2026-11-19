@@ -5,8 +5,19 @@
 // process still closes its server and store instead of dying dirty.
 // Error handling is opt-in: by default the process keeps Node's
 // default crash behaviour.
+//
+// Call onShutdown exactly ONCE per process: each call installs its own
+// listeners and its own run-guard, so two registrations would race
+// each other to process.exit and could truncate each other's cleanups.
+// A hung cleanup cannot wedge shutdown forever: the chain is raced
+// against SHUTDOWN_TIMEOUT_MS and the process exits anyway (a second
+// SIGINT also still kills the process, since the once-listeners are
+// already consumed by then).
 
 import type { Logger } from "./logger.js";
+
+/** Upper bound on the whole cleanup chain before the process exits anyway. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export type Cleanup = () => void | Promise<void>;
 
@@ -28,13 +39,25 @@ export function onShutdown(log: Logger, ...args: Array<Cleanup | ShutdownOptions
     if (running) return;
     running = true;
     log.info("shutting down", { signal });
-    for (const cleanup of cleanups) {
-      try {
-        await cleanup();
-      } catch (err) {
-        log.error("cleanup failed", { error: err instanceof Error ? err.message : String(err) });
+    const runCleanups = (async (): Promise<void> => {
+      for (const cleanup of cleanups) {
+        try {
+          await cleanup();
+        } catch (err) {
+          log.error("cleanup failed", { error: err instanceof Error ? err.message : String(err) });
+        }
       }
-    }
+    })();
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        log.error("shutdown timed out — exiting anyway", { timeoutMs: SHUTDOWN_TIMEOUT_MS });
+        resolve();
+      }, SHUTDOWN_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    await Promise.race([runCleanups, timedOut]);
+    if (timer !== undefined) clearTimeout(timer);
     process.exit(exitCode);
   };
 

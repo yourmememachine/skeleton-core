@@ -1,6 +1,6 @@
 // Store: a tiny JSON-file store. One file, one array of records.
-// Writes are atomic (write to a temp file, then rename) so a crash
-// mid-write can never corrupt the data file, and every write runs
+// Writes are atomic (write to a temp file, then rename) so a process
+// crash mid-write can never corrupt the data file, and every write runs
 // under an exclusive lockfile so two processes sharing the file (the
 // API and the CLI) serialise instead of losing each other's updates.
 // The lockfile carries an ownership token, and a holder only ever
@@ -8,14 +8,26 @@
 // broken as stale and re-acquired by another process, the first
 // holder's release cannot delete the new owner's live lock.
 // Read-modify-write goes through mutate(): inside the lock the file's
-// mtime is re-checked and the contents reloaded if another process
+// stamp is re-checked and the contents reloaded if another process
 // rewrote them, so a change computed from stale in-memory records can
 // never clobber the other writer's newer ones. Reads are cached, keyed
-// on the file's mtime, for the same reason. That is what lets two
-// skeleton apps share one data file with no integration code.
+// on the file's (mtime, size) stamp, for the same reason. That is what
+// lets two skeleton apps share one data file with no integration code.
+//
+// Two contracts callers must know:
+// - Snapshots, not references. Every array that crosses the store's
+//   boundary — out of all()/mutate(), into save() — is a deep copy, so
+//   mutating a returned array (or one you just saved) can never corrupt
+//   the cache or bypass another layer's validation.
+// - Short holds. The lock is held only for one read-modify-write of a
+//   small file (milliseconds). A mutate() callback must not do slow
+//   work, and must never call save()/clear()/mutate() on the same
+//   store — nested writes are rejected immediately instead of
+//   deadlocking against the store's own lockfile.
 // Deliberately boring beyond that: swap this one module when a real
 // database shows up.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -30,20 +42,42 @@ const LOCK_RETRY_SPREAD_MS = 30;
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+interface FileStamp {
+  mtimeMs: number;
+  size: number;
+}
+
 export class JsonStore<T> {
   private records: T[] | null = null;
-  private loadedMtimeMs: number | null = null;
+  private loadedStamp: FileStamp | null = null;
+  /**
+   * Marks the async context of a mutate() callback. A write entered
+   * while this is set is a NESTED write (the callback calling back
+   * into its own store) and is rejected; concurrent writes from
+   * independent callers carry no mark and simply serialise on the
+   * lockfile, as they should.
+   */
+  private readonly writeContext = new AsyncLocalStorage<boolean>();
 
   constructor(private readonly filePath: string) {}
 
   /** Load from disk; reloads if the file changed since the last load. */
   async all(): Promise<T[]> {
-    const mtimeMs = await this.mtime();
-    if (this.records !== null && mtimeMs === this.loadedMtimeMs) return this.records;
+    const stamp = await this.stamp();
+    if (this.records !== null && sameStamp(stamp, this.loadedStamp)) {
+      return structuredClone(this.records);
+    }
     let loaded: T[];
     try {
       const raw = await readFile(this.filePath, "utf8");
-      const parsed: unknown = JSON.parse(raw);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        throw new Error(
+          `Store file ${this.filePath} does not contain valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       if (!Array.isArray(parsed)) {
         throw new Error(`Store file ${this.filePath} does not contain a JSON array`);
       }
@@ -56,8 +90,8 @@ export class JsonStore<T> {
       }
     }
     this.records = loaded;
-    this.loadedMtimeMs = mtimeMs;
-    return loaded;
+    this.loadedStamp = stamp;
+    return structuredClone(loaded);
   }
 
   /** Replace the whole contents and persist atomically, under the lock. */
@@ -72,14 +106,15 @@ export class JsonStore<T> {
 
   /**
    * Read-modify-write as one locked step. The current contents come
-   * from all() *inside* the lock, whose mtime check reloads the file
+   * from all() *inside* the lock, whose stamp check reloads the file
    * if it changed since this instance last loaded it — so `update`
    * merges onto the freshest data instead of overwriting a concurrent
    * writer's records. Returns the persisted contents.
    */
   async mutate(update: (current: T[]) => T[] | Promise<T[]>): Promise<T[]> {
     return this.withLock(async () => {
-      const next = await update(await this.all());
+      const current = await this.all();
+      const next = await this.writeContext.run(true, () => update(current));
       await this.writeAll(next);
       return next;
     });
@@ -89,12 +124,22 @@ export class JsonStore<T> {
   private async writeAll(records: T[]): Promise<void> {
     const tmp = `${this.filePath}.tmp`;
     await writeFile(tmp, JSON.stringify(records, null, 2) + "\n", "utf8");
+    // Stamp the temp file BEFORE the rename and adopt that stamp for
+    // the cached copy: a rewrite by another process landing after our
+    // rename then has a different stamp, so the cache can never adopt
+    // a foreign write's stamp for our own contents.
+    const tmpStat = await stat(tmp);
     await rename(tmp, this.filePath);
-    this.records = records;
-    this.loadedMtimeMs = await this.mtime();
+    this.records = structuredClone(records);
+    this.loadedStamp = { mtimeMs: tmpStat.mtimeMs, size: tmpStat.size };
   }
 
   private async withLock<R>(fn: () => Promise<R>): Promise<R> {
+    if (this.writeContext.getStore() === true) {
+      throw new Error(
+        "JsonStore: nested write — save/clear/mutate cannot be called from inside a mutate callback",
+      );
+    }
     await mkdir(dirname(this.filePath), { recursive: true });
     const token = await this.acquireLock();
     try {
@@ -125,7 +170,17 @@ export class JsonStore<T> {
       try {
         const held = await stat(lockPath);
         if (Date.now() - held.mtimeMs > LOCK_STALE_MS) {
-          await rm(lockPath, { force: true });
+          // Break by moving the stale lock aside, never by deleting
+          // the path outright: rename moves only the lock we actually
+          // saw, so a fresh lock another process took at the same path
+          // in the meantime is never destroyed under its holder.
+          const aside = `${lockPath}.stale-${token}`;
+          try {
+            await rename(lockPath, aside);
+            await rm(aside, { force: true });
+          } catch {
+            // Another waiter moved it first — either way it is gone.
+          }
           continue;
         }
       } catch {
@@ -134,7 +189,9 @@ export class JsonStore<T> {
       if (attempt === LOCK_ATTEMPTS) break;
       await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_SPREAD_MS);
     }
-    throw new Error(`Could not acquire store lock ${lockPath} after ${LOCK_ATTEMPTS} attempts`);
+    throw new Error(
+      `Could not acquire store lock ${lockPath} after ${LOCK_ATTEMPTS} attempts — another process is holding it; if that process crashed, its lock is broken automatically once it is ${LOCK_STALE_MS / 1000}s old, so retrying is safe`,
+    );
   }
 
   /**
@@ -153,11 +210,17 @@ export class JsonStore<T> {
     }
   }
 
-  private async mtime(): Promise<number | null> {
+  private async stamp(): Promise<FileStamp | null> {
     try {
-      return (await stat(this.filePath)).mtimeMs;
+      const s = await stat(this.filePath);
+      return { mtimeMs: s.mtimeMs, size: s.size };
     } catch {
       return null;
     }
   }
+}
+
+function sameStamp(a: FileStamp | null, b: FileStamp | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.mtimeMs === b.mtimeMs && a.size === b.size;
 }
